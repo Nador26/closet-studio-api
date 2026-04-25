@@ -40,7 +40,7 @@ app.post("/analyze", async (req, res) => {
     if (!imageUrl) return res.status(400).json({ error: "imageUrl requis" });
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-5",
       max_tokens: 1000,
       messages: [{
         role: "user",
@@ -84,7 +84,7 @@ app.post("/generate-outfits", async (req, res) => {
     if (allItems.length === 0) return res.json([]);
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-5",
       max_tokens: 2500,
       messages: [{
         role: "user",

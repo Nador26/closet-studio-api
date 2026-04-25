@@ -13,30 +13,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// ─── Health check ─────────────────────────────────
-app.get("/", (req, res) => {
-  res.json({ status: "ok", message: "Closet Studio API" });
-});
-
-// ─── Analyser un vêtement ─────────────────────────
-app.post("/analyze", async (req, res) => {
-  try {
-    const { imageBase64, mediaType = "image/jpeg" } = req.body;
-    if (!imageBase64) return res.status(400).json({ error: "imageBase64 requis" });
-
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: mediaType, data: imageBase64 },
-          },
-          {
-            type: "text",
-            text: `Tu es un expert en mode. Analyse ce vêtement et réponds UNIQUEMENT en JSON :
+const VISION_PROMPT = `Tu es un expert en mode. Analyse ce vêtement et réponds UNIQUEMENT en JSON :
 {
   "label": "nom précis du vêtement",
   "category": "hauts | bas | robes | vestes | chaussures | accessoires | nuit | tenues",
@@ -49,7 +26,32 @@ app.post("/analyze", async (req, res) => {
   "matiere": "matière principale si identifiable sinon null",
   "confidence": "high | medium | low"
 }
-Réponds UNIQUEMENT avec le JSON, rien d'autre.`,
+Réponds UNIQUEMENT avec le JSON, rien d'autre.`;
+
+// ─── Health check ─────────────────────────────────
+app.get("/", (req, res) => {
+  res.json({ status: "ok", message: "Closet Studio API" });
+});
+
+// ─── Analyser un vêtement via URL Cloudinary ──────
+app.post("/analyze", async (req, res) => {
+  try {
+    const { imageUrl } = req.body;
+    if (!imageUrl) return res.status(400).json({ error: "imageUrl requis" });
+
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "url", url: imageUrl },
+          },
+          {
+            type: "text",
+            text: VISION_PROMPT,
           },
         ],
       }],

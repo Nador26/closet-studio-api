@@ -13,7 +13,14 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const VISION_PROMPT = `Tu es un expert en mode. Analyse ce vêtement et réponds UNIQUEMENT en JSON :
+const VISION_PROMPT = `Tu es un expert en mode. Regarde cette image.
+
+D'abord, vérifie si c'est bien un vêtement ou accessoire de mode (t-shirt, pantalon, chaussure, sac, bijou, veste, etc.).
+
+Si ce n'est PAS un vêtement ou accessoire, réponds UNIQUEMENT avec ce JSON :
+{"error": "not_clothing"}
+
+Si c'est bien un vêtement ou accessoire, réponds UNIQUEMENT avec ce JSON :
 {
   "label": "nom précis du vêtement",
   "category": "hauts | bas | robes | vestes | chaussures | accessoires | nuit | tenues",

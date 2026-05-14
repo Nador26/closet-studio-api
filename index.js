@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const Anthropic = require("@anthropic-ai/sdk");
+const { Pool } = require("pg");
 require("dotenv").config();
 
 const app = express();
@@ -11,6 +12,49 @@ app.use(express.json({ limit: "50mb" }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// ─── PostgreSQL ───────────────────────────────────────────────────────────────
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+});
+
+// ─── Créer les tables si elles n'existent pas ─────────────────────────────────
+async function initDB() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS items (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL DEFAULT 'default',
+        label TEXT NOT NULL,
+        category TEXT,
+        subcategory TEXT,
+        color TEXT,
+        motif TEXT,
+        style TEXT,
+        saison TEXT,
+        marque TEXT,
+        matiere TEXT,
+        uri TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS favorites (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL DEFAULT 'default',
+        data JSONB NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log("✅ Base de données initialisée");
+  } catch (e) {
+    console.error("❌ Erreur init DB:", e.message);
+  }
+}
+
+initDB();
+
+// ─── Sécurité URL ─────────────────────────────────────────────────────────────
 const ALLOWED_DOMAINS = [
   "zara.com", "hm.com", "asos.com", "vinted.fr", "vinted.com",
   "zalando.fr", "zalando.com", "shein.com", "mango.com", "uniqlo.com",
@@ -82,10 +126,149 @@ Réponds UNIQUEMENT avec le JSON, rien d'autre.`;
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
-  res.json({ status: "ok", message: "Closet Studio API" });
+  res.json({ status: "ok", message: "Closet Studio API + PostgreSQL" });
 });
 
-// ─── Analyser un vêtement ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════
+// ROUTES ITEMS
+// ═══════════════════════════════════════════════════
+
+// GET tous les items
+app.get("/items", async (req, res) => {
+  try {
+    const userId = req.query.user_id || "default";
+    const result = await pool.query(
+      "SELECT * FROM items WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    // Regroupe par sous-catégorie comme l'app l'attend
+    const grouped = {};
+    result.rows.forEach(item => {
+      if (!grouped[item.subcategory]) grouped[item.subcategory] = [];
+      grouped[item.subcategory].push({
+        id: item.id,
+        label: item.label,
+        category: item.category,
+        subcategory: item.subcategory,
+        color: item.color,
+        motif: item.motif,
+        style: item.style,
+        saison: item.saison,
+        marque: item.marque,
+        matiere: item.matiere,
+        uri: item.uri,
+      });
+    });
+    res.json(grouped);
+  } catch (e) {
+    console.error("Erreur GET /items:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST ajouter un item
+app.post("/items", async (req, res) => {
+  try {
+    const userId = req.query.user_id || "default";
+    const { id, label, category, subcategory, color, motif, style, saison, marque, matiere, uri } = req.body;
+    await pool.query(
+      `INSERT INTO items (id, user_id, label, category, subcategory, color, motif, style, saison, marque, matiere, uri)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       ON CONFLICT (id) DO UPDATE SET label = $3, uri = $12`,
+      [id, userId, label, category, subcategory, color, motif, style, saison, marque, matiere, uri]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Erreur POST /items:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PATCH renommer un item
+app.patch("/items/:id", async (req, res) => {
+  try {
+    const userId = req.query.user_id || "default";
+    const { label } = req.body;
+    await pool.query(
+      "UPDATE items SET label = $1 WHERE id = $2 AND user_id = $3",
+      [label, req.params.id, userId]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Erreur PATCH /items:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE supprimer un item
+app.delete("/items/:id", async (req, res) => {
+  try {
+    const userId = req.query.user_id || "default";
+    await pool.query(
+      "DELETE FROM items WHERE id = $1 AND user_id = $2",
+      [req.params.id, userId]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Erreur DELETE /items:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════
+// ROUTES FAVORITES
+// ═══════════════════════════════════════════════════
+
+// GET tous les favoris
+app.get("/favorites", async (req, res) => {
+  try {
+    const userId = req.query.user_id || "default";
+    const result = await pool.query(
+      "SELECT * FROM favorites WHERE user_id = $1 ORDER BY created_at DESC",
+      [userId]
+    );
+    res.json(result.rows.map(r => r.data));
+  } catch (e) {
+    console.error("Erreur GET /favorites:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST ajouter un favori
+app.post("/favorites", async (req, res) => {
+  try {
+    const userId = req.query.user_id || "default";
+    const { id, ...rest } = req.body;
+    await pool.query(
+      `INSERT INTO favorites (id, user_id, data) VALUES ($1, $2, $3)
+       ON CONFLICT (id) DO NOTHING`,
+      [id, userId, JSON.stringify({ id, ...rest })]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Erreur POST /favorites:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE supprimer un favori
+app.delete("/favorites/:id", async (req, res) => {
+  try {
+    const userId = req.query.user_id || "default";
+    await pool.query(
+      "DELETE FROM favorites WHERE id = $1 AND user_id = $2",
+      [req.params.id, userId]
+    );
+    res.json({ success: true });
+  } catch (e) {
+    console.error("Erreur DELETE /favorites:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════
+// ANALYSER UN VÊTEMENT
+// ═══════════════════════════════════════════════════
 app.post("/analyze", async (req, res) => {
   try {
     const { imageUrl } = req.body;
@@ -123,7 +306,9 @@ app.post("/analyze", async (req, res) => {
   }
 });
 
-// ─── Générer des tenues (avec météo) ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════
+// GÉNÉRER DES TENUES
+// ═══════════════════════════════════════════════════
 app.post("/generate-outfits", async (req, res) => {
   try {
     const { items, mood, profile, weather } = req.body;
@@ -140,12 +325,10 @@ app.post("/generate-outfits", async (req, res) => {
 
     if (allItems.length === 0) return res.json([]);
 
-    // ✅ Description météo pour Claude
     const weatherDesc = weather
-      ? `Météo actuelle : ${weather.temp}°C, ${weather.description}, ressenti ${weather.feels_like}°C, humidité ${weather.humidity}%.`
-      : "Météo : 18°C, printemps (donnée non disponible).";
+      ? `Météo actuelle : ${weather.temp}°C, ${weather.description}, ressenti ${weather.feels_like}°C.`
+      : "Météo : 18°C, printemps.";
 
-    // ✅ Conseils vestimentaires selon température
     let tempAdvice = "";
     if (weather) {
       if (weather.temp < 5) tempAdvice = "Il fait très froid : privilégie manteaux, pulls épais, écharpes.";
@@ -162,32 +345,22 @@ app.post("/generate-outfits", async (req, res) => {
         role: "user",
         content: `Tu es un expert en mode et styliste personnel.
 
-L'utilisateur a ces vêtements dans sa garde-robe :
+L'utilisateur a ces vêtements :
 ${JSON.stringify(allItems, null, 2)}
 
-Profil utilisateur :
-- Genre : ${profile?.genre || "non spécifié"}
-- Styles préférés : ${(profile?.styles || []).join(", ") || "non spécifié"}
-- Couleurs préférées : ${(profile?.couleurs || []).join(", ") || "non spécifié"}
-
-Mood du jour : ${mood?.label || "casual"} ${mood?.emoji || ""}
-
+Profil : genre=${profile?.genre || "non spécifié"}, styles=${(profile?.styles || []).join(", ")}, couleurs=${(profile?.couleurs || []).join(", ")}
+Mood : ${mood?.label || "casual"} ${mood?.emoji || ""}
 ${weatherDesc}
 ${tempAdvice}
 
 Crée exactement 5 suggestions de tenues DIFFÉRENTES en utilisant UNIQUEMENT les vêtements de la liste.
-Les tenues doivent être adaptées à la météo ET au mood de l'utilisateur.
-Si il fait froid, n'oublie pas d'inclure des vestes/manteaux. Si il fait chaud, évite les layering.
-
 Réponds UNIQUEMENT en JSON :
 [
   {
-    "titre": "Nom court et stylé de la tenue",
-    "description": "Description courte et inspirante (max 15 mots)",
+    "titre": "Nom court et stylé",
+    "description": "Description courte (max 15 mots)",
     "contexte": "Pour quelle occasion",
-    "pieces": [
-      {"id": "id", "label": "nom", "subcategory": "sous-catégorie", "uri": "url"}
-    ]
+    "pieces": [{"id": "id", "label": "nom", "subcategory": "sous-catégorie", "uri": "url"}]
   }
 ]`,
       }],
@@ -203,5 +376,5 @@ Réponds UNIQUEMENT en JSON :
 });
 
 app.listen(port, () => {
-  console.log(`✅ Closet Studio API running on port ${port}`);
+  console.log(`✅ Closet Studio API + PostgreSQL running on port ${port}`);
 });

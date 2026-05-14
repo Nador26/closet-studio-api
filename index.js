@@ -105,13 +105,16 @@ async function fetchImageAsBase64(url) {
 
 const VISION_PROMPT = `Tu es un expert en mode. Regarde cette image attentivement.
 
-ÉTAPE 1 : Est-ce que cette image montre UN vêtement ou UN accessoire de mode isolé ?
+Cette image peut montrer :
+- Un vêtement ou accessoire isolé sur fond blanc
+- Une tenue portée par une personne ou un mannequin
+- Une photo de mode ou lookbook
 
-Si ce n'est PAS un vêtement → réponds UNIQUEMENT : {"error": "not_clothing"}
+Si l'image ne montre VRAIMENT rien de vestimentaire (animal, paysage, nourriture, objet non vestimentaire) → réponds UNIQUEMENT : {"error": "not_clothing"}
 
-Si c'est un vêtement → réponds avec ce JSON :
+Si tu vois UN vêtement principal ou une tenue → identifie la pièce principale et réponds avec ce JSON :
 {
-  "label": "nom précis du vêtement",
+  "label": "nom précis du vêtement principal",
   "category": "hauts | bas | robes | vestes | chaussures | accessoires | nuit | tenues",
   "subcategory": "tshirts | chemises | blouses | pulls | sweats | debardeurs | polos | jeans | pantalons | shorts | jogging | jupes | robe_casual | robe_soiree | combinaisons_longues | combishorts | vestes_legeres | blazers | manteaux | doudounes | trenchs | baskets | bottes | sandales | talons | mocassins | sport_shoes | sacs | ceintures | bijoux | lunettes | chapeaux | echarpes | montres | sous_vetements | pyjamas | lingerie | chaussettes | look_casual | look_chic | look_sport | look_soiree",
   "color": "couleur principale",
